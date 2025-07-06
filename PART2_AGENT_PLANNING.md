@@ -1,96 +1,44 @@
-Part 2: Agentic Planning Write-Up
+# Part 2: Agentic Planning Write-Up
 
-This document details how the chatbot's planner/controller system functions, as required by Part 2 of the assessment. The system is built using LangChain's Agent framework, which provides a robust loop for decision-making and action execution.
-Objective: The Decision-Making Loop
+This document provides a concise overview of how the chatbot's planner and controller system works.
 
-The core objective is to show how the bot decides its next action. Our implementation, centered around the AgentExecutor, accomplishes this by performing a continuous loop that can be broken down into the three key phases requested in the assessment:
+## The Agentic Loop: How the Bot Decides
 
-    Parsing Intent and Missing Information
+The chatbot decides its next action using a "planner/controller" loop powered by LangChain's Agent framework. This system breaks down the complex task of conversation into a simple, repeated cycle: **Reason -> Act -> Observe**.
 
-    Choosing an Action
+### Core Components
 
-    Executing the Action and Returning the Result
+The decision-making process relies on a few key components working together:
 
-Core Components of the Planner/Controller
+1.  **The LLM (The Brain):** An OpenAI model (`gpt-3.5-turbo`) that does all the reasoning. It reads the user's question, the conversation history, and the list of available tools to understand the user's intent.
 
-Before detailing the phases, it's important to understand the components that constitute our "planner/controller code" (app/chatbot.py):
+2.  **The Tools (The Abilities):** A list of functions the agent can use to get information it doesn't know. Our agent has three tools:
+    *   **`Calculator`:** For solving math problems.
+    *   **`ZUS_Product_Knowledge_Base`:** For answering questions about ZUS drinkware products via a RAG API.
+    *   **`ZUS_Outlet_Information`:** For looking up store details via a Text-to-SQL API.
 
-    LLM (ChatOpenAI): The core reasoning engine. It's the "brain" that does the actual parsing and deciding.
+3.  **The Prompt (The Instructions):** A set of instructions that tells the LLM its goal, what tools it has, and how to use them. The LLM's decision-making is heavily guided by the **description** provided for each tool.
 
-    Tools (tools list): A list of capabilities the agent can use. Currently, this includes the Calculator tool. The description of each tool is critical, as the LLM uses it to determine relevance.
+4.  **The Agent Executor (The Engine):** This is the main loop that orchestrates the entire process from start to finish.
 
-    Memory (ConversationBufferMemory): Stores the history of the conversation. This provides essential context for the LLM to understand follow-up questions and user intent over multiple turns.
+### The Three Phases of a Turn
 
-    Prompt (AGENT_PROMPT): A carefully crafted set of instructions that guides the LLM. It tells the agent its persona, how to think, what tools it has access to, and where to find the conversation history and its own internal thoughts (the "scratchpad").
+When a user asks a question, the `AgentExecutor` runs through the following phases:
 
-    Agent Logic (create_openai_tools_agent): This creates the agent's logic, specifically designed to leverage the native tool-calling ability of modern OpenAI models.
+#### 1. Parse Intent (Reason)
 
-    Agent Executor (AgentExecutor): This is the runtime that orchestrates the entire loop. It takes user input, invokes the agent, executes tool calls, and manages the flow of information.
+The LLM analyzes the user's input in the context of the conversation history. It determines what the user is trying to achieve. For example, it recognizes "what is 5 * 10?" as a math task, and "tell me about your tumblers" as a product information request.
 
-Phase 1: Parsing Intent and Missing Information
+#### 2. Choose an Action (Act)
 
-This phase is primarily handled by the LLM based on the information provided to it by the AgentExecutor.
+Based on the parsed intent, the LLM makes a choice:
 
-    Input Synthesis: For every turn, the LLM receives a comprehensive package of information structured by the AGENT_PROMPT. This includes:
+*   **Use a Tool:** If the user's query matches a tool's description (e.g., asking about math triggers the `Calculator`), the LLM decides to invoke that tool.
+*   **Respond Directly:** If no tool is relevant (e.g., for "hello" or "thank you"), or if a tool has already provided the necessary information, the LLM decides to generate a final answer for the user.
+*   **Ask a Follow-up Question:** If the user's query is ambiguous (e.g., "tell me about the outlet"), the LLM will respond directly by asking for clarification ("Which outlet are you referring to?").
 
-        The user's latest message ({input}).
+#### 3. Execute and Observe (Observe)
 
-        The full conversation history (chat_history).
-
-        The descriptions of all available tools.
-
-    Intent Inference: The LLM synthesizes this information to understand the user's goal.
-
-        If the user asks, "What is 15 * 25?", the LLM identifies a clear mathematical intent.
-
-        If the user asks, "What about that outlet in SS2?", the LLM uses the chat_history to infer that "that outlet" refers to a previously discussed topic, thus correctly parsing the intent of a follow-up question.
-
-    Handling Missing Information: If information is missing, the LLM can decide to ask a clarifying question. This is a form of choosing the "respond directly" action, where the response itself is the follow-up question.
-
-Phase 2: Choosing an Action
-
-Once the LLM has parsed the intent, it chooses one of the following actions:
-
-    Invoke a Tool (e.g., Calculator):
-
-        Trigger: The user's query strongly matches a tool's description.
-
-        Mechanism: The LLM, using its native tool-calling ability, generates a structured output indicating which tool to call (Calculator) and what arguments to pass (e.g., the expression 15 * 25).
-
-        Example: For "Calculate 100/4", the LLM chooses to Invoke: Calculator with the input 100/4.
-
-    Respond Directly to the User (Finish):
-
-        Trigger: The user's query does not match any tool's description, or a tool has already provided all the necessary information for a final answer.
-
-        Mechanism: The LLM generates a natural language response intended for the user.
-
-        Example: For "What's your name?", the LLM finds no relevant tool and chooses to respond directly with "I am an AI assistant...".
-
-    Ask a Follow-Up Question:
-
-        This is a sub-type of "Respond Directly." The LLM formulates a question to gather more information from the user before it can proceed.
-
-Phase 3: Executing the Action and Returning the Result
-
-This phase is managed by the AgentExecutor.
-
-    If the chosen action is a TOOL CALL:
-
-        The AgentExecutor receives the tool name and arguments from the LLM.
-
-        It executes the corresponding Python function (e.g., safe_calculator_run).
-
-        The return value from the function becomes the Observation.
-
-        Crucially, this Observation is not the final answer. It is added to the agent_scratchpad and the loop repeats from Phase 1. The LLM now sees the tool's result and decides its next action, which is often to formulate a final answer to the user.
-
-        This loop is how our agent handles tool errors gracefully. The safe_calculator_run returns an error message as the Observation, and the LLM then formulates a polite, user-friendly response based on that error message.
-
-    If the chosen action is to RESPOND DIRECTLY:
-
-        The AgentExecutor recognizes this as the "Finish" state.
-
-        It stops the loop and returns the LLM's generated text as the final output of the chain. This is the response the user sees.
-
-This iterative process of Thought (LLM) → Action (Tool/Response) → Observation (Tool Result) allows the agent to handle complex, multi-step tasks and interact with its tools effectively before presenting a final, coherent answer to the user. The same framework will be used to integrate the more advanced RAG and Text2SQL tools in Part 4.
+*   If a tool was chosen, the `AgentExecutor` runs the corresponding Python function.
+*   The result of that function—whether it's a successful answer or a handled error message—is captured as an **Observation**.
+*   This Observation is fed back to the LLM. The loop then repeats, allowing the LLM to reason based on this new information until it has a final answer for the user. This iterative process is what allows the agent to handle multi-step tasks and recover from tool errors gracefully.
