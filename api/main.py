@@ -25,7 +25,6 @@ app = FastAPI(
 )
 
 # --- Define Project Root and Paths ---
-# This approach is more robust for deployment environments like Vercel
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FAISS_INDEX_PATH = PROJECT_ROOT / "db" / "faiss_product_index"
 SQLITE_DB_PATH = PROJECT_ROOT / "db" / "outlets.db"
@@ -51,7 +50,6 @@ except Exception as e:
 # --- Initialize Text2SQL components (on startup) ---
 try:
     db = SQLDatabase.from_uri(f"sqlite:///{str(SQLITE_DB_PATH)}")
-    # We re-use the 'llm' instance from the RAG setup
     sql_query_chain = create_sql_query_chain(llm, db)
     print("Text2SQL components loaded successfully.")
 except Exception as e:
