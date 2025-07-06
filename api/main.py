@@ -2,6 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from pathlib import Path
 import os
 
 # Imports for RAG Logic
@@ -23,12 +24,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# --- Define Project Root and Paths ---
+# This approach is more robust for deployment environments like Vercel
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FAISS_INDEX_PATH = PROJECT_ROOT / "db" / "faiss_product_index"
+SQLITE_DB_PATH = PROJECT_ROOT / "db" / "outlets.db"
+
+
 # --- Initialize RAG components (on startup) ---
 try:
-    db_dir = os.path.join(os.path.dirname(__file__), '..', 'db')
-    faiss_index_path = os.path.join(db_dir, 'faiss_product_index')
     embeddings = OpenAIEmbeddings()
-    vector_store = FAISS.load_local(faiss_index_path, embeddings, allow_dangerous_deserialization=True)
+    vector_store = FAISS.load_local(str(FAISS_INDEX_PATH), embeddings, allow_dangerous_deserialization=True)
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
     llm = ChatOpenAI(temperature=0.3, model_name="gpt-3.5-turbo")
     rag_prompt = ChatPromptTemplate.from_template("""You are an assistant for question-answering tasks for ZUS Coffee products. Use the following pieces of retrieved context to answer the question. If you don't know the answer from the context, just say that you don't have information on that. Be concise and helpful.
@@ -44,9 +50,8 @@ except Exception as e:
 
 # --- Initialize Text2SQL components (on startup) ---
 try:
-    db_dir = os.path.join(os.path.dirname(__file__), '..', 'db')
-    db_path = os.path.join(db_dir, 'outlets.db')
-    db = SQLDatabase.from_uri(f"sqlite:///{db_path}")
+    db = SQLDatabase.from_uri(f"sqlite:///{str(SQLITE_DB_PATH)}")
+    # We re-use the 'llm' instance from the RAG setup
     sql_query_chain = create_sql_query_chain(llm, db)
     print("Text2SQL components loaded successfully.")
 except Exception as e:
