@@ -1,20 +1,22 @@
 # api/main.py
+
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+# from pydantic import BaseModel # Not needed if we remove the model
 from dotenv import load_dotenv
-from pathlib import Path
 import os
+from pathlib import Path
 
-# Imports for RAG Logic
-from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+# --- COMMENT OUT HEAVY RAG IMPORTS ---
+# from langchain_community.vectorstores import FAISS
+# from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+# from langchain.chains import create_retrieval_chain
+# from langchain.chains.combine_documents import create_stuff_documents_chain
+# from langchain_core.prompts import ChatPromptTemplate
 
-# Imports for Text2SQL Logic
+# Imports for Text2SQL Logic (KEEP THESE)
 from langchain_community.utilities import SQLDatabase
 from langchain.chains import create_sql_query_chain
+from langchain_openai import ChatOpenAI # Still need this for Text2SQL
 
 load_dotenv()
 
@@ -24,34 +26,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- Define Project Root and Paths ---
-# This approach is more robust for deployment environments like Vercel
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FAISS_INDEX_PATH = PROJECT_ROOT / "db" / "faiss_product_index"
-SQLITE_DB_PATH = PROJECT_ROOT / "db" / "outlets.db"
+# Re-use the llm instance for the SQL chain
+llm = ChatOpenAI(temperature=0.3, model_name="gpt-3.5-turbo")
 
 
-# --- Initialize RAG components (on startup) ---
-try:
-    embeddings = OpenAIEmbeddings()
-    vector_store = FAISS.load_local(str(FAISS_INDEX_PATH), embeddings, allow_dangerous_deserialization=True)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-    llm = ChatOpenAI(temperature=0.3, model_name="gpt-3.5-turbo")
-    rag_prompt = ChatPromptTemplate.from_template("""You are an assistant for question-answering tasks for ZUS Coffee products. Use the following pieces of retrieved context to answer the question. If you don't know the answer from the context, just say that you don't have information on that. Be concise and helpful.
-    Question: {input}
-    Context: {context}
-    Answer:""")
-    document_chain = create_stuff_documents_chain(llm, rag_prompt)
-    rag_chain = create_retrieval_chain(retriever, document_chain)
-    print("RAG components loaded successfully.")
-except Exception as e:
-    print(f"Error loading RAG components: {e}")
-    rag_chain = None
+# --- FAKE RAG ENDPOINT (REPLACES REAL ONE) ---
+# This section is a placeholder for the demo to avoid large dependencies.
+# The full RAG logic is available in the 'main' branch of the repository.
+print("RAG components are MOCKED for this deployment.")
+rag_chain = True # Set to a non-None value to pass the check in the endpoint
+
 
 # --- Initialize Text2SQL components (on startup) ---
+PROJECT_ROOT = Path(os.environ.get('LAMBDA_TASK_ROOT', '.'))
+SQLITE_DB_PATH = PROJECT_ROOT / "db" / "outlets.db"
 try:
     db = SQLDatabase.from_uri(f"sqlite:///{str(SQLITE_DB_PATH)}")
-    # We re-use the 'llm' instance from the RAG setup
     sql_query_chain = create_sql_query_chain(llm, db)
     print("Text2SQL components loaded successfully.")
 except Exception as e:
@@ -66,15 +56,19 @@ def read_root():
     return {"status": "API is running", "message": "Welcome!"}
 
 @app.get("/products", response_model=dict)
-async def get_product_info(query: str):
-    if not rag_chain:
-        raise HTTPException(status_code=500, detail="RAG system is not available.")
-    try:
-        response = await rag_chain.ainvoke({"input": query})
-        return {"summary": response.get("answer", "No answer could be generated."), "query": query}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error during RAG chain invocation: {e}")
+async def get_product_info_mock(query: str):
+    """
+    MOCKED ENDPOINT for demo purposes. Returns a canned response.
+    The full RAG implementation is in the main branch.
+    """
+    print(f"Received query for MOCKED /products endpoint: {query}")
+    if "tumbler" in query.lower():
+        return {"summary": "This is a mocked response for a ZUS Tumbler. It has great insulation and comes in many colors. The full RAG implementation can be run locally.", "query": query}
+    else:
+        return {"summary": "This is a mocked response. My knowledge base for this demo is limited. The full RAG implementation can be run locally.", "query": query}
 
+
+# --- KEEP THE REAL OUTLETS ENDPOINT ---
 @app.get("/outlets", response_model=dict)
 async def get_outlet_info(query: str):
     if not sql_query_chain or not db:
